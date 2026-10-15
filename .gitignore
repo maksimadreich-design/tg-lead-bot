@@ -1,0 +1,4 @@
+__pycache__/
+*.session-journal
+leads.db
+.env
