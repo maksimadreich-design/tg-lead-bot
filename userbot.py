@@ -84,8 +84,8 @@ async def handle_new_message(event):
         await notify_admin(f"⚠️ Помилка ШІ під час аналізу: `{err}`")
         return
 
-    # 3. Якщо це замовник
-    if analysis.is_client_request and analysis.relevance_score >= 60:
+    # 3. Якщо це замовник із чітким технічним завданням (поріг 75%) та доступним контактом
+    if analysis.is_client_request and analysis.relevance_score >= 75 and sender_id != 0:
         logger.info(f"🔥 ЗНАЙДЕНО ЛІД! Релевантність: {analysis.relevance_score}% | {sender_name}")
         
         lead_id = await save_lead(

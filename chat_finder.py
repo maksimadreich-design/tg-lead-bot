@@ -9,8 +9,8 @@ from alert_bot import notify_admin, STATS
 
 logger = logging.getLogger("CHAT_FINDER")
 
-# Затримка між вступами: мінімум 5 хвилин (300 секунд) для повного захисту від банів
-JOIN_DELAY_SECONDS = 300
+# Затримка між вступами: 2 хвилини (120 секунд)
+JOIN_DELAY_SECONDS = 120
 
 UA_SEARCH_QUERIES = [
     "робота it україна", "вакансії україна it", "фріланс україна", 
