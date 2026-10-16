@@ -87,12 +87,18 @@ async def send_lead_card(
 
     STATS["leads_found"] += 1
 
+    buttons = []
+    
     if sender_username:
         user_url = f"https://t.me/{sender_username}"
         user_tag = f"@{sender_username}"
-    else:
+        buttons.append([InlineKeyboardButton(text="💬 Написати в ЛС", url=user_url)])
+    elif sender_id:
         user_url = f"tg://user?id={sender_id}"
         user_tag = f"[{sender_name}]({user_url})"
+        buttons.append([InlineKeyboardButton(text="💬 Відкрити профіль", url=user_url)])
+    else:
+        user_tag = sender_name
 
     text = (
         f"🎯 **НОВИЙ ЛІД (Релевантність: {relevance_score}%)**\n\n"
@@ -104,10 +110,8 @@ async def send_lead_card(
         f"_(натисніть на текст вище, щоб скопіювати)_"
     )
 
-    buttons = []
-    buttons.append([InlineKeyboardButton(text="💬 Написати замовнику", url=user_url)])
     if message_link:
-        buttons.append([InlineKeyboardButton(text="🔗 Повідомлення в чаті", url=message_link)])
+        buttons.append([InlineKeyboardButton(text="🔗 Відповісти в чаті на замовлення", url=message_link)])
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 

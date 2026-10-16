@@ -1,6 +1,5 @@
-import logging
-import asyncio
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 import config
 from database import is_message_processed, mark_message_processed, save_lead
 from ai_analyzer import AIAnalyzer
@@ -10,8 +9,11 @@ logger = logging.getLogger(__name__)
 
 ai = AIAnalyzer()
 
+# Якщо є TELEGRAM_STRING_SESSION (для хмари Render) — використовуємо її, інакше локальний файл
+session_source = StringSession(config.TELEGRAM_STRING_SESSION) if config.TELEGRAM_STRING_SESSION else "userbot_session"
+
 client = TelegramClient(
-    "userbot_session",
+    session_source,
     config.TELEGRAM_API_ID,
     config.TELEGRAM_API_HASH
 )
@@ -67,10 +69,18 @@ async def handle_new_message(event):
     last_name = getattr(sender, 'last_name', '') or ''
     sender_name = f"{first_name} {last_name}".strip() or "Користувач"
 
+    # Якщо юзер без юзернейма, get_sender() іноді повертає None або Channel
+    if not sender_id and event.message.from_id:
+        from_id_obj = event.message.from_id
+        sender_id = getattr(from_id_obj, 'user_id', 0)
+
+    # Надійне формування посилання на повідомлення в чаті
     if chat_username:
         msg_link = f"https://t.me/{chat_username}/{msg_id}"
     else:
-        msg_link = ""
+        # Для приватних супергруп (формат c/ID/MSG_ID)
+        clean_chat_id = str(chat_id).replace("-100", "").replace("-", "")
+        msg_link = f"https://t.me/c/{clean_chat_id}/{msg_id}"
 
     STATS["last_action"] = f"Аналіз повідомлення від {sender_name} у '{chat_title}'"
     logger.info(f"🔍 Аналізуємо повідомлення з '{chat_title}' від {sender_name}...")
