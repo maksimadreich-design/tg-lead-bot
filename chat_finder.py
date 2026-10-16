@@ -82,7 +82,7 @@ async def try_join_chat(client: TelegramClient, peer_or_tag) -> bool:
             await notify_admin(
                 f"🇺🇦 **Вступив у новий UA-чат:**\n*{title}* ({uname})\n"
                 f"Всього чатів у системі: {STATS['joined_chats']}\n"
-                f"⏳ Наступний вступ через 5 хвилин (захист акаунта)."
+                f"⏳ Наступний вступ через 2 хвилини."
             )
             logger.info(f"✅ Вступив у {title}. Чекаємо {JOIN_DELAY_SECONDS}с перед наступним...")
             await asyncio.sleep(JOIN_DELAY_SECONDS)
@@ -100,8 +100,8 @@ async def try_join_chat(client: TelegramClient, peer_or_tag) -> bool:
 async def auto_discover_and_join_chats(client: TelegramClient, target_chats_count: int = 30):
     await clean_russian_chats(client)
     
-    STATS["last_action"] = "Плавне підключення українських чатів (інтервал 5 хв)..."
-    await notify_admin("🇺🇦 **Запущено безпечний авто-вступ в українські чати (інтервал: 1 чат раз на 5 хвилин).**")
+    STATS["last_action"] = "Плавне підключення українських чатів (інтервал 2 хв)..."
+    await notify_admin("🇺🇦 **Запущено безпечний авто-вступ в українські чати (інтервал: 1 чат кожні 2 хвилини).**")
 
     # 1. По черзі додаємо кураторські чати
     for chat_tag in CURATED_UA_CHATS:
