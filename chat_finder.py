@@ -1,42 +1,37 @@
 import asyncio
 import logging
+import re
 from telethon import TelegramClient
 from telethon.tl.functions.contacts import SearchRequest
 from telethon.tl.functions.channels import JoinChannelRequest, LeaveChannelRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
 from telethon.tl.types import Channel
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, UserAlreadyParticipantError
 from alert_bot import notify_admin, STATS
 
 logger = logging.getLogger("CHAT_FINDER")
 
-# Інтервал вступу: 2 хвилини
 JOIN_DELAY_SECONDS = 120
 
-# Суто комерційні, розробницькі та фріланс-запити
-DEV_SEARCH_QUERIES = [
-    "замовлення ботів", "розробка ботів", "потрібен розробник",
-    "замовлення сайтів", "веб розробка замовлення", "it замовлення",
-    "фріланс розробка", "потрібен програміст", "створення сайтів замовлення",
-    "парсер telegram замовлення", "python розробка замовлення", "it проекти фріланс"
-]
-
-# Топові цільові українські чати розробки та бірж завдань
-CURATED_DEV_CHATS = [
+# Ваші пріоритетні джерела (канали та групи замовлень)
+TARGET_SOURCES = [
+    "freelance_for_ukraine",        # Український Freelance
+    "FreelancehuntProjects",        # Freelancehunt Projects
+    "FreelancehuntJobs",            # Freelancehunt Jobs
+    "nofluffjobsukraine",           # No Fluff Jobs Ukraine
+    "freelance_in_ukraine",         # Freelance in Ukraine
+    "work_hub_0",                   # Work Hub
+    "https://t.me/+TAnlc22ehOBlOGYy", # Приватний інвайт чат
+    # Додаткові топові профільні IT-чати
     "robota_itszp",
     "freelanceukraine",
     "dev_ua_chat",
     "freelance_ua_orders",
-    "itvacanciesukraine",
     "python_ua",
-    "frontend_ukraine",
-    "jobs_it_ua",
-    "fl_ua_chat",
-    "it_orders_ukraine",
-    "webdev_ua",
-    "telegram_bots_ua"
+    "frontend_ukraine"
 ]
 
-# Стоп-слова для груп: біженці, візи, допомога, оренда, побутові теми
+# Стоп-слова: біженці, візи, допомога, оренда, барахолка
 JUNK_CHAT_MARKERS = [
     "avito", "авито", "россия", "москва", "питер", "спб", "рф", "рублей", "руб",
     "захист", "біженці", "допомога", "італія", "польща", "німеччина", "віза", 
@@ -44,106 +39,78 @@ JUNK_CHAT_MARKERS = [
     "барахолка", "куплю", "продам", "авто", "одяг", "манікюр", "робота в польщі"
 ]
 
-# Обов'язкові ключові слова: група має бути пов'язана з IT / розробкою
-REQUIRED_KEYWORDS = [
-    "it", "dev", "бот", "bot", "сайт", "web", "розроб", "програм", "фриланс", 
-    "фріланс", "freelance", "замовлен", "code", "python", "frontend", "backend"
-]
-
-def is_junk_or_non_it_chat(title: str, username: str = "") -> bool:
+def is_junk_chat(title: str, username: str = "") -> bool:
     content = f"{title} {username}".lower()
-    
-    # 1. Відсікаємо будь-яке сміття (біженці, оренда, країни, барахолки, ру-чати)
-    if any(marker in content for marker in JUNK_CHAT_MARKERS):
-        return True
-        
-    # 2. Якщо в назві або юзернеймі взагалі немає жодного натяку на IT/розробку/сайти
-    if not any(req in content for req in REQUIRED_KEYWORDS):
-        return True
-        
-    return False
+    return any(marker in content for marker in JUNK_CHAT_MARKERS)
 
-async def clean_junk_chats(client: TelegramClient):
-    """Виходить з усіх лівих груп (біженці, допомога, ру-чати, барахолки)."""
-    logger.info("🧹 Очищення від нецільових груп...")
-    removed_count = 0
+async def join_target_source(client: TelegramClient, source: str) -> bool:
+    """Універсальне підключення до каналу, групи або приватного інвайт-посилання."""
     try:
-        dialogs = await client.get_dialogs()
-        for dialog in dialogs:
-            if dialog.is_channel or dialog.is_group:
-                title = dialog.title or ""
-                entity = dialog.entity
-                username = getattr(entity, 'username', '') or ''
-                if is_junk_or_non_it_chat(title, username):
-                    logger.info(f"🚫 Виходимо з нецільового чату: {title}")
-                    try:
-                        await client(LeaveChannelRequest(entity))
-                        removed_count += 1
-                        await asyncio.sleep(2)
-                    except Exception as e:
-                        logger.warning(f"Не вдалося вийти з {title}: {e}")
-        if removed_count > 0:
-            await notify_admin(f"🧹 **Очищення:** видалено {removed_count} нерелевантних чатів (біженці/барахолки).")
-    except Exception as e:
-        logger.error(f"Помилка очищення: {e}")
+        # 1. Якщо це приватне інвайт-посилання (+TAnlc22ehOBlOGYy або joinchat)
+        if "+" in source or "joinchat" in source:
+            match = re.search(r'(?:\+|\/joinchat\/)([a-zA-Z0-9_-]+)', source)
+            if match:
+                hash_code = match.group(1)
+                try:
+                    updates = await client(ImportChatInviteRequest(hash_code))
+                    STATS["joined_chats"] += 1
+                    chat_name = "Приватний чат"
+                    if hasattr(updates, 'chats') and updates.chats:
+                        chat_name = updates.chats[0].title
+                    await notify_admin(f"🎯 **Успішно приєднався до інвайт-чату:**\n*{chat_name}*")
+                    logger.info(f"✅ Вступив по інвайту: {chat_name}")
+                    await asyncio.sleep(JOIN_DELAY_SECONDS)
+                    return True
+                except UserAlreadyParticipantError:
+                    logger.info(f"Вже учасник інвайт-чату: {source}")
+                    return True
+                except Exception as e:
+                    logger.warning(f"Не вдалося вступити по інвайту {source}: {e}")
+            return False
 
-async def try_join_chat(client: TelegramClient, peer_or_tag) -> bool:
-    try:
-        entity = await client.get_entity(peer_or_tag)
-        if isinstance(entity, Channel) and getattr(entity, 'left', True):
-            title = entity.title or "Без назви"
-            uname = f"@{entity.username}" if entity.username else "приватний"
-            
-            # Жорстка перевірка: тільки IT, сайти, боти, фріланс
-            if is_junk_or_non_it_chat(title, uname):
-                logger.info(f"Пропуск нецільового чату: {title}")
-                return False
+        # 2. Якщо це публічний username/посилання
+        clean_tag = source.replace("https://t.me/s/", "").replace("https://t.me/", "").replace("@", "").split("/")[0]
+        entity = await client.get_entity(clean_tag)
+        
+        title = getattr(entity, 'title', clean_tag)
+        uname = f"@{getattr(entity, 'username', clean_tag)}"
 
+        if is_junk_chat(title, uname):
+            logger.info(f"Пропуск нецільового чату: {title}")
+            return False
+
+        # Якщо ми ще не там
+        if getattr(entity, 'left', True):
             await client(JoinChannelRequest(entity))
             STATS["joined_chats"] += 1
             await notify_admin(
-                f"💻 **Додано цільовий IT/Dev чат:**\n*{title}* ({uname})\n"
-                f"Всього чатів у системі: {STATS['joined_chats']}\n"
-                f"⏳ Наступний вступ через 2 хвилини."
+                f"💻 **Додано цільове джерело:**\n*{title}* ({uname})\n"
+                f"Всього джерел у моніторингу: {STATS['joined_chats']}\n"
+                f"⏳ Інтервал: 2 хв."
             )
-            logger.info(f"✅ Вступив у {title}. Пауза {JOIN_DELAY_SECONDS}с...")
+            logger.info(f"✅ Успішно підключено: {title}. Пауза {JOIN_DELAY_SECONDS}с...")
             await asyncio.sleep(JOIN_DELAY_SECONDS)
             return True
+        else:
+            logger.info(f"Вже підписані на: {title}")
+            return True
+
     except FloodWaitError as e:
         wait_min = round(e.seconds / 60, 1)
         await notify_admin(f"⏳ **Telegram ліміт:** пауза на {wait_min} хв перед наступним вступом.")
         await asyncio.sleep(e.seconds + 5)
     except Exception as e:
-        logger.debug(f"Пропуск {peer_or_tag}: {e}")
-        await asyncio.sleep(4)
+        logger.warning(f"Помилка підключення до {source}: {e}")
+        await asyncio.sleep(5)
     return False
 
 async def auto_discover_and_join_chats(client: TelegramClient, target_chats_count: int = 30):
-    await clean_junk_chats(client)
-    
-    STATS["last_action"] = "Підключення профільних IT-чатів із замовленнями..."
-    await notify_admin("💻 **Запущено пошук СУТО IT/WEB/DEV чатів (сайти, боти, автоматизація, фріланс).**")
+    STATS["last_action"] = "Підключення вказаних користувачем цільових IT-каналів..."
+    await notify_admin("🎯 **Починаю підключення до ваших персональних IT/Freelance джерел...**")
 
-    # 1. Додаємо перевірені IT-спільноти
-    for chat_tag in CURATED_DEV_CHATS:
-        if STATS["joined_chats"] >= target_chats_count:
-            break
-        await try_join_chat(client, chat_tag)
+    # 1. Підключаємо ваші джерела одне за одним
+    for src in TARGET_SOURCES:
+        await join_target_source(client, src)
 
-    # 2. Пошук виключно за комерційними IT-запитами
-    for query in DEV_SEARCH_QUERIES:
-        if STATS["joined_chats"] >= target_chats_count:
-            break
-        try:
-            res = await client(SearchRequest(q=query, limit=10))
-            for peer in res.chats:
-                if STATS["joined_chats"] >= target_chats_count:
-                    break
-                if isinstance(peer, Channel) and (peer.megagroup or peer.gigagroup):
-                    await try_join_chat(client, peer)
-        except Exception as err:
-            logger.error(f"Помилка пошуку '{query}': {err}")
-            await asyncio.sleep(10)
-
-    STATS["last_action"] = f"Моніторинг {STATS['joined_chats']} IT-чатів у реальному часі."
-    await notify_admin(f"✅ **Пул IT-чатів зібрано!** Всього профільних чатів: {STATS['joined_chats']}.")
+    STATS["last_action"] = f"Моніторинг {STATS['joined_chats']} цільових IT-джерел у реальному часі."
+    await notify_admin(f"✅ **Усі ваші джерела підключено!** Моніторинг активний 24/7.")

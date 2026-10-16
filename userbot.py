@@ -64,17 +64,24 @@ async def handle_new_message(event):
         STATS["filtered_out"] += 1
         return
 
+    # Якщо це звичайний юзер або канал-замовник
     sender = await event.get_sender()
-    if getattr(sender, 'bot', False):
-        return  # Ігноруємо повідомлення від інших ботів (економить ліміти Gemini)
+    
+    # Якщо повідомлення з публічного каналу вакансій/проєктів (наприклад Freelancehunt)
+    if not sender and event.is_channel:
+        sender_id = chat_id
+        sender_username = chat_username or ""
+        sender_name = chat_title
+    else:
+        # Ігноруємо сторонніх ботів-спамерів
+        if getattr(sender, 'bot', False):
+            return
+        sender_id = getattr(sender, 'id', 0)
+        sender_username = getattr(sender, 'username', '')
+        first_name = getattr(sender, 'first_name', '') or ''
+        last_name = getattr(sender, 'last_name', '') or ''
+        sender_name = f"{first_name} {last_name}".strip() or "Користувач"
 
-    sender_id = getattr(sender, 'id', 0)
-    sender_username = getattr(sender, 'username', '')
-    first_name = getattr(sender, 'first_name', '') or ''
-    last_name = getattr(sender, 'last_name', '') or ''
-    sender_name = f"{first_name} {last_name}".strip() or "Користувач"
-
-    # Якщо юзер без юзернейма, get_sender() іноді повертає None або Channel
     if not sender_id and event.message.from_id:
         from_id_obj = event.message.from_id
         sender_id = getattr(from_id_obj, 'user_id', 0)
