@@ -75,3 +75,19 @@ async def save_lead(
         ))
         await db.commit()
         return cursor.lastrowid
+
+async def get_recent_leads(limit: int = 50) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT id, sender_id, sender_username, sender_name,
+                   chat_title, chat_username, message_text,
+                   ai_summary, ai_pitch, relevance_score, message_link,
+                   status, created_at
+            FROM leads
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,))
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+

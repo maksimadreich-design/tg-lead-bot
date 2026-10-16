@@ -90,17 +90,21 @@ async def handle_new_message(event):
     STATS["last_action"] = f"Аналіз повідомлення від {sender_name} у '{chat_title}'"
     logger.info(f"🔍 Аналізуємо повідомлення з '{chat_title}' від {sender_name}...")
 
-    # 2. ШІ-аналіз через Gemini
+    # 2. ШІ-аналіз через Gemini з динамічними налаштуваннями
+    from settings_manager import get_settings
+    settings = await get_settings()
+
+    min_score = settings.get("min_relevance_score", 75)
+
     try:
         loop = asyncio.get_event_loop()
         analysis = await loop.run_in_executor(None, ai.analyze_message, text)
     except Exception as err:
         logger.error(f"Помилка аналізу ШІ: {err}")
-        await notify_admin(f"⚠️ Помилка ШІ під час аналізу: `{err}`")
         return
 
-    # 3. Якщо це замовник із чітким технічним завданням (поріг 75%) та доступним контактом
-    if analysis.is_client_request and analysis.relevance_score >= 75 and sender_id != 0:
+    # 3. Якщо це замовник із чітким технічним завданням та доступним контактом
+    if analysis.is_client_request and analysis.relevance_score >= min_score and sender_id != 0:
         logger.info(f"🔥 ЗНАЙДЕНО ЛІД! Релевантність: {analysis.relevance_score}% | {sender_name}")
         
         lead_id = await save_lead(
@@ -128,5 +132,26 @@ async def handle_new_message(event):
             relevance_score=analysis.relevance_score,
             message_link=msg_link
         )
+
+        # 4. 🤖 AI SALES MANAGER (Авто-відповідач 1-в-1 як в OSTRO AI)
+        if settings.get("auto_reply_enabled", False):
+            auto_min = settings.get("auto_reply_min_score", 85)
+            if analysis.relevance_score >= auto_min and analysis.suggested_pitch:
+                delay = settings.get("auto_reply_delay_seconds", 15)
+                logger.info(f"🤖 AI Sales Manager: очікуємо {delay}с перед авто-відповіддю для {sender_name}...")
+                await asyncio.sleep(delay)
+
+                reply_mode = settings.get("auto_reply_mode", "chat_reply")
+                try:
+                    if reply_mode == "chat_reply":
+                        # Відповідь реплаєм у чаті під повідомленням клієнта
+                        await event.reply(analysis.suggested_pitch)
+                        await notify_admin(f"🤖 **AI Sales Manager відповів клієнту в чаті:**\n*Чат:* {chat_title}\n*Клієнт:* {sender_name}\n*Текст:* `{analysis.suggested_pitch}`")
+                    elif reply_mode == "direct_message" and sender_id:
+                        # Відправка першого повідомлення напряму в ЛС
+                        await client.send_message(sender_id, analysis.suggested_pitch)
+                        await notify_admin(f"🤖 **AI Sales Manager написав клієнту в ЛС:**\n*Клієнт:* {sender_name} (@{sender_username})\n*Текст:* `{analysis.suggested_pitch}`")
+                except Exception as auto_err:
+                    logger.warning(f"Не вдалося виконати авто-відповідь: {auto_err}")
     else:
         STATS["filtered_out"] += 1
