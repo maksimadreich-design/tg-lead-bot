@@ -24,7 +24,7 @@ class LeadAnalysis(BaseModel):
 class AIAnalyzer:
     def __init__(self):
         self.client = genai.Client(api_key=config.GEMINI_API_KEY)
-        self.model = "gemini-3.5-flash-lite"
+        self.models = ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"]
 
     def analyze_message(self, text: str) -> LeadAnalysis:
         # Швидкий пре-фільтр на сміття / короткі повідомлення
@@ -56,23 +56,26 @@ class AIAnalyzer:
 \"\"\"{text}\"\"\"
 """
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=LeadAnalysis,
-                    temperature=0.2,
+        for model_name in self.models:
+            try:
+                response = self.client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=LeadAnalysis,
+                        temperature=0.2,
+                    )
                 )
-            )
-            data = json.loads(response.text)
-            return LeadAnalysis(**data)
-        except Exception as e:
-            logger.error(f"Помилка аналізу через Gemini: {e}")
-            return LeadAnalysis(
-                is_client_request=False,
-                relevance_score=0,
-                summary=f"Помилка аналізу: {e}",
-                suggested_pitch=""
-            )
+                data = json.loads(response.text)
+                return LeadAnalysis(**data)
+            except Exception as e:
+                logger.warning(f"Помилка або ліміт з моделлю {model_name}: {e}. Пробуємо запасну модель...")
+                continue
+
+        return LeadAnalysis(
+            is_client_request=False,
+            relevance_score=0,
+            summary="Всі моделі зайняті або ліміт запитів",
+            suggested_pitch=""
+        )

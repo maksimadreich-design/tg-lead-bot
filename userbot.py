@@ -65,6 +65,9 @@ async def handle_new_message(event):
         return
 
     sender = await event.get_sender()
+    if getattr(sender, 'bot', False):
+        return  # Ігноруємо повідомлення від інших ботів (економить ліміти Gemini)
+
     sender_id = getattr(sender, 'id', 0)
     sender_username = getattr(sender, 'username', '')
     first_name = getattr(sender, 'first_name', '') or ''
